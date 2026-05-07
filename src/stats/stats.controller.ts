@@ -219,6 +219,7 @@ export class StatsController {
         .createQueryBuilder('file')
         .innerJoinAndSelect('file.folder', 'folder')
         .where('folder.id IN (:...accessibleFolderIds)', { accessibleFolderIds })
+        .andWhere('file.owner_id = :userId', { userId })
         .andWhere('file.deleted_at IS NULL')
         .andWhere('folder.deleted_at IS NULL')
         .orderBy('file.created_at', 'DESC')
