@@ -38,6 +38,25 @@ export class UsersController {
     };
   }
 
+  @Get('my-roles')
+  async getMyRoles(@Request() req: RequestWithUser) {
+    return this.usersService.getUserRoles(req.user.id);
+  }
+
+  @Post('switch-role')
+  async switchRole(
+    @Request() req: RequestWithUser,
+    @Body() body: { role_id: string },
+  ) {
+    const user = await this.usersService.findOne(req.user.id);
+    // Just return the user and the requested role info
+    // (the JWT token refresh would normally be handled by AuthService)
+    return {
+      user,
+      active_role: user.role,
+    };
+  }
+
   @Get()
   async findAll(@Query() paginationDto: PaginationDto) {
     return this.usersService.findAll(
@@ -74,5 +93,41 @@ export class UsersController {
     await this.usersService.remove(id);
     return { message: 'User deleted successfully' };
   }
-}
 
+  // ========== Multi-Role Assignment ==========
+
+  @Get(':id/roles')
+  async getUserRoles(@Param('id') id: string) {
+    return this.usersService.getUserRoles(id);
+  }
+
+  @Post(':id/roles')
+  async assignRole(
+    @Param('id') id: string,
+    @Body() body: { role_id: string; is_primary?: boolean; expires_at?: string | null },
+  ) {
+    return this.usersService.assignRoleToUser(
+      id,
+      body.role_id,
+      body.is_primary || false,
+      body.expires_at || null,
+    );
+  }
+
+  @Delete(':userId/roles/:roleId')
+  async removeRole(
+    @Param('userId') userId: string,
+    @Param('roleId') roleId: string,
+  ) {
+    await this.usersService.removeRoleFromUser(userId, roleId);
+    return { message: 'Role berhasil dihapus dari user' };
+  }
+
+  @Patch(':userId/roles/:roleId/set-primary')
+  async setPrimaryRole(
+    @Param('userId') userId: string,
+    @Param('roleId') roleId: string,
+  ) {
+    return this.usersService.setPrimaryRole(userId, roleId);
+  }
+}

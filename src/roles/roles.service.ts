@@ -1,8 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Role } from '../entities';
+import { Role, User } from '../entities';
 import { CreateRoleDto } from './dto/create-role.dto';
+import { UpdateRoleDto } from './dto/update-role.dto';
 
 @Injectable()
 export class RolesService {
@@ -18,8 +24,56 @@ export class RolesService {
   }
 
   async create(createRoleDto: CreateRoleDto): Promise<Role> {
+    // Validasi duplicate role name
+    const existing = await this.roleRepository.findOne({
+      where: { name: createRoleDto.name },
+    });
+    if (existing) {
+      throw new ConflictException('Role dengan nama tersebut sudah ada');
+    }
+
     const role = this.roleRepository.create(createRoleDto);
     return await this.roleRepository.save(role);
+  }
+
+  async update(id: string, updateRoleDto: UpdateRoleDto): Promise<Role> {
+    const role = await this.findOne(id);
+
+    // Validasi duplicate role name jika nama diubah
+    if (updateRoleDto.name && updateRoleDto.name !== role.name) {
+      const existing = await this.roleRepository.findOne({
+        where: { name: updateRoleDto.name },
+      });
+      if (existing) {
+        throw new ConflictException('Role dengan nama tersebut sudah ada');
+      }
+    }
+
+    Object.assign(role, updateRoleDto);
+    return await this.roleRepository.save(role);
+  }
+
+  async remove(id: string): Promise<void> {
+    const role = await this.findOne(id);
+
+    // Prevent delete for Super Admin and System Roles
+    const protectedRoles = ['super admin', 'superadmin', 'admin'];
+    if (protectedRoles.includes(role.name.toLowerCase().trim())) {
+      throw new ForbiddenException(
+        'Tidak dapat menghapus role system / admin',
+      );
+    }
+
+    // Validasi jika masih digunakan user sebagai default role
+    const userRepo = this.roleRepository.manager.getRepository(User);
+    const usersCount = await userRepo.count({ where: { role_id: id } });
+    if (usersCount > 0) {
+      throw new ConflictException(
+        `Role ini masih digunakan oleh ${usersCount} user sebagai default role, tidak dapat dihapus`,
+      );
+    }
+
+    await this.roleRepository.remove(role);
   }
 
   async findOne(id: string): Promise<Role> {
@@ -28,7 +82,7 @@ export class RolesService {
     });
 
     if (!role) {
-      throw new Error('Role not found');
+      throw new NotFoundException('Role not found');
     }
 
     return role;
@@ -39,6 +93,7 @@ export class RolesService {
       where: { name },
     });
   }
+
   async updateRoleDepth(roleIds: string[], maxDepth: number): Promise<void> {
     if (roleIds.length === 0) return;
     await this.roleRepository.update(roleIds, { max_folder_depth: maxDepth });
@@ -64,4 +119,3 @@ export class RolesService {
       .map(role => ({ id: role.id, name: role.name }));
   }
 }
-
