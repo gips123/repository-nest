@@ -1,6 +1,7 @@
-import { Controller, Get, UseGuards, Patch, Body } from '@nestjs/common';
+import { Controller, Get, UseGuards, Patch, Body, Post } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CreateRoleDto } from './dto/create-role.dto';
 
 @Controller('roles')
 @UseGuards(JwtAuthGuard)
@@ -10,6 +11,20 @@ export class RolesController {
   @Get()
   async findAll() {
     return this.rolesService.findAll();
+  }
+
+  @Post()
+  async create(@Body() createRoleDto: CreateRoleDto) {
+    return this.rolesService.create(createRoleDto);
+  }
+
+  /**
+   * Returns roles available for Group Role Sharing.
+   * Excludes Super Admin and system/internal roles.
+   */
+  @Get('sharable')
+  async findSharable() {
+    return this.rolesService.findSharable();
   }
 
   @Patch('depth')

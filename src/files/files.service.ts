@@ -110,7 +110,7 @@ export class FilesService {
     return this.fileRepository.save(fileEntity);
   }
 
-  async findAll(folderId: string, user: User): Promise<File[]> {
+  async findAll(folderId: string, user: User): Promise<any[]> {
     const folder = await this.folderRepository.findOne({
       where: { id: folderId },
     });
@@ -133,20 +133,28 @@ export class FilesService {
       );
     }
 
-    const fullUser = await this.fileRepository.manager.getRepository(User).findOne({ where: { id: user.id }, relations: ['role'] });
-    const roleName = fullUser?.role?.name?.toLowerCase() || '';
-    const isDosenOrTendik = roleName.includes('dosen') || roleName.includes('tendik');
-
-    const whereCondition: any = { folder_id: folderId };
-    if (isDosenOrTendik) {
-      whereCondition.owner_id = user.id;
-    }
-
-    return this.fileRepository.find({
-      where: whereCondition,
+    // SHARED FOLDER SINGLE SOURCE: All users with read permission see ALL files
+    // No owner_id filter - this ensures that when a folder is shared,
+    // all roles see the same files (upload/delete/rename sync across roles)
+    const files = await this.fileRepository.find({
+      where: { folder_id: folderId },
       relations: ['owner', 'owner.role'],
       order: { created_at: 'DESC' },
     });
+
+    // Check if user has download permission for this folder
+    const canDownload = await this.foldersService.checkPermission(
+      user.id,
+      user.role_id,
+      folderId,
+      'download',
+    );
+
+    // Attach can_download flag to each file for the frontend
+    return files.map(file => ({
+      ...file,
+      can_download: canDownload,
+    }));
   }
 
   async findOne(id: string, user: User): Promise<File> {
@@ -173,7 +181,9 @@ export class FilesService {
       );
     }
 
-    await this.verifyOwnershipIfRestricted(file, user);
+    // SHARED FOLDER SINGLE SOURCE: If user has folder-level read permission,
+    // they can see ALL files in the folder regardless of owner.
+    // The ownership restriction is removed to support shared folder sync.
 
     return file;
   }
@@ -217,7 +227,8 @@ export class FilesService {
       );
     }
 
-    await this.verifyOwnershipIfRestricted(file, user);
+    // SHARED FOLDER SINGLE SOURCE: ownership restriction removed
+    // If user has folder/file-level read permission, preview is allowed
 
     file.last_accessed_at = new Date();
     await this.fileRepository.save(file);
@@ -263,7 +274,8 @@ export class FilesService {
       );
     }
 
-    await this.verifyOwnershipIfRestricted(file, user);
+    // SHARED FOLDER SINGLE SOURCE: ownership restriction removed
+    // If user has folder/file-level download permission, download is allowed
 
     file.last_accessed_at = new Date();
     await this.fileRepository.save(file);

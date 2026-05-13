@@ -102,5 +102,14 @@ export class FoldersController {
     await this.foldersService.remove(id);
     return { message: 'Folder deleted successfully' };
   }
+
+  /**
+   * Returns the current role sharing permissions for a folder.
+   * Used by the frontend to populate the Group Role Sharing UI.
+   */
+  @Get(':id/role-permissions')
+  async getFolderRolePermissions(@Param('id') id: string) {
+    return this.foldersService.getFolderRolePermissions(id);
+  }
 }
 

@@ -185,8 +185,30 @@ export class FoldersService {
     // a parent folder can share with Dosen+Tendik, but a sub-folder
     // can be restricted to only Tendik.
 
-    // Auto-share with specified roles (e.g. dosen, tendik)
-    if (createFolderDto.share_with_roles && createFolderDto.share_with_roles.length > 0) {
+    // NEW: Auto-share with role_shares (role IDs with can_download)
+    if (createFolderDto.role_shares && createFolderDto.role_shares.length > 0) {
+      for (const rs of createFolderDto.role_shares) {
+        const existing = await this.permissionRepository.findOne({
+          where: { folder_id: savedFolder.id, role_id: rs.role_id },
+        });
+
+        if (!existing) {
+          const role = await this.roleRepository.findOne({ where: { id: rs.role_id } });
+          const isDosenOrTendik = role ? this.isDosenOrTendikRole(role.name) : false;
+          await this.permissionRepository.save({
+            folder_id: savedFolder.id,
+            role_id: rs.role_id,
+            can_read: true,
+            can_download: !!rs.can_download,
+            can_create: isDosenOrTendik,
+            can_update: isDosenOrTendik,
+            can_delete: isDosenOrTendik,
+          });
+        }
+      }
+    }
+    // LEGACY: Auto-share with specified roles by name (e.g. dosen, tendik)
+    else if (createFolderDto.share_with_roles && createFolderDto.share_with_roles.length > 0) {
       for (const roleLabel of createFolderDto.share_with_roles) {
         const role = await this.findRoleByLabel(roleLabel);
 
@@ -491,27 +513,62 @@ export class FoldersService {
     const ownerRoleId = ownerUser?.role?.id || null;
 
     // --- SINKRONISASI GRUP ROLE SHARING ---
-    if (updateFolderDto.share_with_roles) {
-      const targetRoleIds: string[] = [];
-      for (const roleLabel of updateFolderDto.share_with_roles) {
-        const role = await this.findRoleByLabel(roleLabel);
-        if (role) targetRoleIds.push(role.id);
-      }
+    // NEW: role_shares takes priority over legacy share_with_roles
+    if (updateFolderDto.role_shares) {
+      const targetRoleIds = updateFolderDto.role_shares.map(rs => rs.role_id);
+      const roleShareMap = new Map(updateFolderDto.role_shares.map(rs => [rs.role_id, rs]));
 
       // Hapus izin role yang tidak ada di targetRoleIds untuk folder ini
       // PENTING: Jangan hapus permission role milik owner folder sendiri
       const currentRolePerms = folder.permissions.filter(p => !!p.role_id);
       for (const p of currentRolePerms) {
-        // Protect owner's own role permission
         if (p.role_id === ownerRoleId) continue;
         if (!targetRoleIds.includes(p.role_id!)) {
           await this.permissionRepository.delete(p.id);
         }
       }
 
-      // Tambahkan yang belum ada
+      // Tambah / Update role permissions
+      for (const rs of updateFolderDto.role_shares) {
+        if (rs.role_id === ownerRoleId) continue;
+        const existing = currentRolePerms.find(p => p.role_id === rs.role_id);
+        if (existing) {
+          // Update can_download for existing role permission
+          await this.permissionRepository.update(existing.id, {
+            can_download: !!rs.can_download,
+          });
+        } else {
+          const role = await this.roleRepository.findOne({ where: { id: rs.role_id } });
+          const isDosenOrTendik = role ? this.isDosenOrTendikRole(role.name) : false;
+          await this.permissionRepository.save({
+            folder_id: folder.id,
+            role_id: rs.role_id,
+            can_read: true,
+            can_download: !!rs.can_download,
+            can_create: isDosenOrTendik,
+            can_update: isDosenOrTendik,
+            can_delete: isDosenOrTendik,
+          });
+        }
+      }
+    }
+    // LEGACY: share_with_roles by name (backward compatibility)
+    else if (updateFolderDto.share_with_roles) {
+      const targetRoleIds: string[] = [];
+      for (const roleLabel of updateFolderDto.share_with_roles) {
+        const role = await this.findRoleByLabel(roleLabel);
+        if (role) targetRoleIds.push(role.id);
+      }
+
+      const currentRolePerms = folder.permissions.filter(p => !!p.role_id);
+      for (const p of currentRolePerms) {
+        if (p.role_id === ownerRoleId) continue;
+        if (!targetRoleIds.includes(p.role_id!)) {
+          await this.permissionRepository.delete(p.id);
+        }
+      }
+
       for (const roleId of targetRoleIds) {
-        // Skip if it's the owner's own role (already has full permissions)
         if (roleId === ownerRoleId) continue;
         if (!currentRolePerms.find(p => p.role_id === roleId)) {
           const role = await this.roleRepository.findOne({ where: { id: roleId } });
@@ -658,5 +715,27 @@ export class FoldersService {
     });
   }
 
-}
+  /**
+   * Returns the current role sharing permissions for a folder.
+   * Used by the frontend to populate the Group Role Sharing UI.
+   */
+  async getFolderRolePermissions(folderId: string): Promise<Array<{
+    role_id: string;
+    role_name: string;
+    can_download: boolean;
+  }>> {
+    const permissions = await this.permissionRepository.find({
+      where: { folder_id: folderId },
+      relations: ['role'],
+    });
 
+    return permissions
+      .filter(p => p.role_id && p.role)
+      .map(p => ({
+        role_id: p.role_id!,
+        role_name: p.role!.name,
+        can_download: p.can_download,
+      }));
+  }
+
+}
